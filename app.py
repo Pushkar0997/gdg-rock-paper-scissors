@@ -3,6 +3,7 @@ import tensorflow as tf
 from tensorflow import keras
 import numpy as np
 import json
+from threading import Lock
 import av
 import cv2
 
@@ -12,6 +13,7 @@ from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
 # Config
 # -----------------------
 IMG_SIZE = (128, 128)  # must match Colab training [page:1]
+PREDICTION_LOCK = Lock()
 
 
 # -----------------------
@@ -19,7 +21,7 @@ IMG_SIZE = (128, 128)  # must match Colab training [page:1]
 # -----------------------
 @st.cache_resource
 def load_model_and_classes():
-    model = keras.models.load_model("model/rps_model.h5")
+    model = keras.models.load_model("model/rps_model.h5", compile=False)
     with open("model/class_names.json", "r") as f:
         class_names = json.load(f)
     return model, class_names
@@ -56,10 +58,8 @@ class RPSVideoTransformer(VideoTransformerBase):
 
         try:
             input_tensor = preprocess_frame(img)
-            preds = model.predict(input_tensor, verbose=0)
-
-            # Debug: show raw predictions in browser sidebar
-            st.sidebar.write("Preds:", preds)
+            with PREDICTION_LOCK:
+                preds = model(input_tensor, training=False).numpy()
 
             prob = float(np.max(preds))
             cls_idx = int(np.argmax(preds))
