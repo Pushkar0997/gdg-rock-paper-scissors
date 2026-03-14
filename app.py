@@ -1,10 +1,12 @@
 import streamlit as st
 import tensorflow as tf
-from tensorflow import keras
 import numpy as np
 import json
 import av
 import cv2
+from pathlib import Path
+import tempfile
+import zipfile
 
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
 
@@ -17,9 +19,47 @@ IMG_SIZE = (128, 128)  # must match Colab training [page:1]
 # -----------------------
 # Load model + class names
 # -----------------------
+def _strip_quantization_config(obj):
+    if isinstance(obj, dict):
+        obj.pop("quantization_config", None)
+        for value in obj.values():
+            _strip_quantization_config(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            _strip_quantization_config(item)
+
+
+def _load_sanitized_keras_model(model_path: Path):
+    with zipfile.ZipFile(model_path, "r") as src_zip:
+        config = json.loads(src_zip.read("config.json").decode("utf-8"))
+        _strip_quantization_config(config)
+
+        with tempfile.NamedTemporaryFile(suffix=".keras", delete=False) as tmp_file:
+            temp_model_path = Path(tmp_file.name)
+
+    with zipfile.ZipFile(model_path, "r") as src_zip, zipfile.ZipFile(temp_model_path, "w") as dst_zip:
+        for item in src_zip.infolist():
+            if item.filename == "config.json":
+                dst_zip.writestr(item, json.dumps(config))
+            else:
+                dst_zip.writestr(item, src_zip.read(item.filename))
+
+    try:
+        return tf.keras.models.load_model(temp_model_path, compile=False)
+    finally:
+        temp_model_path.unlink(missing_ok=True)
+
+
 @st.cache_resource
 def load_model_and_classes():
-    model = keras.models.load_model("model/rps_model.h5")
+    model_path_keras = Path("model/rps_model.keras")
+
+    # Try default load first; if it fails, sanitize unsupported config keys and retry.
+    try:
+        model = tf.keras.models.load_model(model_path_keras, compile=False)
+    except Exception:
+        model = _load_sanitized_keras_model(model_path_keras)
+
     with open("model/class_names.json", "r") as f:
         class_names = json.load(f)
     return model, class_names
@@ -57,9 +97,6 @@ class RPSVideoTransformer(VideoTransformerBase):
         try:
             input_tensor = preprocess_frame(img)
             preds = model.predict(input_tensor, verbose=0)
-
-            # Debug: show raw predictions in browser sidebar
-            st.sidebar.write("Preds:", preds)
 
             prob = float(np.max(preds))
             cls_idx = int(np.argmax(preds))
