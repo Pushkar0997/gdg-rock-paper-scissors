@@ -14,6 +14,12 @@ from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
 # Config
 # -----------------------
 IMG_SIZE = (128, 128)  # must match Colab training [page:1]
+RTC_CONFIGURATION = {
+    "iceServers": [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+    ]
+}
 
 
 # -----------------------
@@ -134,6 +140,7 @@ st.write(
 webrtc_streamer(
     key="rps",
     mode=WebRtcMode.SENDRECV,
+    rtc_configuration=RTC_CONFIGURATION,
     video_transformer_factory=RPSVideoTransformer,
     media_stream_constraints={"video": True, "audio": False},
 )
